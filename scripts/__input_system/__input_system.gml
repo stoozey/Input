@@ -1,15 +1,28 @@
 #macro __INPUT_VERSION                   "3.3.3"
 #macro __INPUT_DATE                      "2020-04-14"
 #macro __INPUT_DEBUG                     false
-#macro __INPUT_SDL2_DATABASE_FILENAME    "sdl2.txt"                //Name of the SDL2 database to read gamepad remapping definitions from
-#macro __INPUT_CONTROLLER_TYPE_FILENAME  "controllertypes.csv"     //Name of the controller type database to read gamepad types from
-#macro __INPUT_BLACKLIST_FILENAME        "controllerblacklist.csv" //Name of the controller blacklist database to read from
+#macro __INPUT_SDL2_DATABASE_FILENAME    INPUT_INCLUDED_FILES_SUBDIRECTORY + "sdl2.txt"                //Name of the SDL2 database to read gamepad remapping definitions from
+#macro __INPUT_CONTROLLER_TYPE_FILENAME  INPUT_INCLUDED_FILES_SUBDIRECTORY + "controllertypes.csv"     //Name of the controller type database to read gamepad types from
+#macro __INPUT_BLACKLIST_FILENAME        INPUT_INCLUDED_FILES_SUBDIRECTORY + "controllerblacklist.csv" //Name of the controller blacklist database to read from
+#macro __INPUT_ON_CONSOLE                ((os_type == os_switch) || (os_type == os_ps4) || (os_type == os_ps5) || (os_type == os_xboxone) || (os_type == os_xboxseriesxs))
+#macro __INPUT_ON_DESKTOP                ((os_type == os_windows) || (os_type == os_macosx) || (os_type == os_linux))
+#macro __INPUT_ON_MOBILE                 ((os_type == os_ios) || (os_type == os_android))
+#macro __INPUT_ON_HTML5                  (os_browser != browser_not_a_browser)
 
 enum INPUT_SOURCE
 {
     NONE,
     KEYBOARD_AND_MOUSE,
     GAMEPAD,
+    __SIZE
+}
+
+enum __INPUT_MAPPING
+{
+    BUTTON,
+    AXIS,
+    HAT,
+    HAT_ON_AXIS,
     __SIZE
 }
 
@@ -58,6 +71,11 @@ global.__input_frame = 0;
 global.__input_mouse_x     = 0;
 global.__input_mouse_y     = 0;
 global.__input_mouse_moved = false;
+
+//Windows tap-to-click tracking
+global.__input_tap_presses  = 0;
+global.__input_tap_releases = 0;
+global.__input_tap_click    = false;
 
 //Cursor tracking variables. This is Input's abstraction layer for the mouse, allowing mouse-like functionality cross-platform
 global.__input_cursor_verb_u      = undefined;
@@ -158,7 +176,7 @@ else
 if (INPUT_SDL2_ALLOW_EXTERNAL)
 {
     var _external_string = environment_get_variable("SDL_GAMECONTROLLERCONFIG");
-    if (_external_string != "")
+    if (is_string(_external_string) && (_external_string != ""))
     {
         __input_trace("External SDL2 string found");
         
@@ -168,13 +186,13 @@ if (INPUT_SDL2_ALLOW_EXTERNAL)
         }
         catch(_error)
         {
-            __input_trace_loud("Error!\n\n%SDL_GAMECONTROLLERCONFIG% could not be parsed.\nYou may see unexpected behaviour when using gamepads.\n\nTo remove this error, clear %SDL_GAMECONTROLLERCONFIG%\n\nInput ", __INPUT_VERSION, "   @jujuadams ", __INPUT_DATE);
+            __input_trace_loud("Error!\n\n%SDL_GAMECONTROLLERCONFIG% could not be parsed.\nYou may see unexpected behaviour when using gamepads.\n\nTo remove this error, clear %SDL_GAMECONTROLLERCONFIG%\n\nInput ", __INPUT_VERSION, "   @jujuadams and @offalynne ", __INPUT_DATE);
         }
     }
 }
 
 //Parse the controller type database
-global.__input_type_dictionary = { none : "xb360" };
+global.__input_raw_type_dictionary = { none : "XBox360Controller" };
 
 if (file_exists(__INPUT_CONTROLLER_TYPE_FILENAME))
 {
@@ -203,57 +221,53 @@ if (INPUT_DESKTOP_IGNORE_RESERVED_KEYS_LEVEL == 1)
     input_ignore_key_add(vk_alt);
     input_ignore_key_add(vk_ralt);
     input_ignore_key_add(vk_lalt);
-    input_ignore_key_add(91); //left meta
-    input_ignore_key_add(92); //right meta
+    input_ignore_key_add(91); //meta
+    input_ignore_key_add(92); //meta
 }
 else if (INPUT_DESKTOP_IGNORE_RESERVED_KEYS_LEVEL == 2)
 {
     input_ignore_key_add(vk_alt);
     input_ignore_key_add(vk_ralt);
     input_ignore_key_add(vk_lalt);
-    input_ignore_key_add(91); //left meta
-    input_ignore_key_add(92); //right meta
+    input_ignore_key_add(91); //meta
+    input_ignore_key_add(92); //meta
     
     input_ignore_key_add(144); //num lock
     input_ignore_key_add(145); //scroll lock
     
-    input_ignore_key_add(0x15); //IME key
-    input_ignore_key_add(0x16); //IME key
-    input_ignore_key_add(0x17); //IME key
-    input_ignore_key_add(0x18); //IME key
-    input_ignore_key_add(0x19); //IME key
-    input_ignore_key_add(0x1A); //IME key
-    input_ignore_key_add(0xE5); //IME key
-    
-    input_ignore_key_add(0xA6); //Browser key
-    input_ignore_key_add(0xA7); //Browser key
-    input_ignore_key_add(0xA8); //Browser key
-    input_ignore_key_add(0xA9); //Browser key
-    input_ignore_key_add(0xAA); //Browser key
-    input_ignore_key_add(0xAB); //Browser key
-    input_ignore_key_add(0xAC); //Browser key
-    
-    input_ignore_key_add(0xAD); //Media key
-    input_ignore_key_add(0xAE); //Media key
-    input_ignore_key_add(0xAF); //Media key
-    input_ignore_key_add(0xB0); //Media key
-    input_ignore_key_add(0xB1); //Media key
-    input_ignore_key_add(0xB2); //Media key
-    input_ignore_key_add(0xB3); //Media key
-    input_ignore_key_add(0xB4); //Media key
-    input_ignore_key_add(0xB5); //Media key
-    input_ignore_key_add(0xB6); //Media key
-    input_ignore_key_add(0xB7); //Media key
+    if (os_type == os_windows)
+    {
+        input_ignore_key_add(0x15); //IME key
+        input_ignore_key_add(0x16); //IME key
+        input_ignore_key_add(0x17); //IME key
+        input_ignore_key_add(0x18); //IME key
+        input_ignore_key_add(0x19); //IME key
+        input_ignore_key_add(0x1A); //IME key
+        input_ignore_key_add(0xE5); //IME key
+
+        input_ignore_key_add(0xA6); //Browser key
+        input_ignore_key_add(0xA7); //Browser key
+        input_ignore_key_add(0xA8); //Browser key
+        input_ignore_key_add(0xA9); //Browser key
+        input_ignore_key_add(0xAA); //Browser key
+        input_ignore_key_add(0xAB); //Browser key
+        input_ignore_key_add(0xAC); //Browser key
+
+        input_ignore_key_add(0xAD); //Media key
+        input_ignore_key_add(0xAE); //Media key
+        input_ignore_key_add(0xAF); //Media key
+        input_ignore_key_add(0xB0); //Media key
+        input_ignore_key_add(0xB1); //Media key
+        input_ignore_key_add(0xB2); //Media key
+        input_ignore_key_add(0xB3); //Media key
+        input_ignore_key_add(0xB4); //Media key
+        input_ignore_key_add(0xB5); //Media key
+        input_ignore_key_add(0xB6); //Media key
+        input_ignore_key_add(0xB7); //Media key
+
+        input_ignore_key_add(0xFF); //Vendor key
+    }
 }
-
-
-
-
-
-
-
-
-
 
 //These are globally scoped rather than methods because otherwise they'd get serialised by input_bindings_write()
 
@@ -262,7 +276,7 @@ function __input_binding_duplicate(_source)
 {
     with(_source)
     {
-        return new __input_class_binding(type, value, axis_negative);
+        return new __input_class_binding(type, value, axis_negative, label);
     }
 }
 
@@ -275,6 +289,7 @@ function __input_binding_overwrite(_from, _to)
         type          = _from.type;
         value         = _from.value;
         axis_negative = _from.axis_negative;
+        label         = _from.label;
     }
     
     return _to;
